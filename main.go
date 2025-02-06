@@ -52,7 +52,7 @@ func main() {
 
 	r := gin.Default()
 
-	r.POST("/r", func(c *gin.Context) {
+	r.POST("/register", func(c *gin.Context) {
 		var newUser user
 		if err := c.ShouldBindJSON(&newUser); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"message": "Error to input data...."})
@@ -63,7 +63,7 @@ func main() {
 			"messsage": newUser.Name + newUser.Pass})
 	})
 
-	r.POST("/l", func(c *gin.Context) {
+	r.POST("/login", func(c *gin.Context) {
 		var LoginUser user
 		if err := c.ShouldBindJSON(&LoginUser); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "Error to login data...."})
@@ -86,7 +86,7 @@ func main() {
 		}
 		c.JSON(http.StatusUnauthorized, gin.H{"Error": "Invalid user name or password"})
 	})
-	r.GET("/p", func(c *gin.Context) {
+	r.GET("/profile", func(c *gin.Context) {
 		headAtu := c.GetHeader("Authorization")
 		if headAtu == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid heder....."})
