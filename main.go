@@ -1,13 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type user struct {
@@ -16,6 +20,7 @@ type user struct {
 }
 
 var securKey = []byte("This_my_security")
+var fileName string = "saveUser.json"
 
 func makeToken(newUser user) (string, error) {
 
@@ -46,21 +51,78 @@ func validationToken(tokenString string) (*jwt.Token, error) {
 	return token, nil
 
 }
+func loadFile(fileName string) []user {
+	_, err := os.Stat(fileName)
+	if err == nil {
+		file, err := os.OpenFile(fileName, os.O_RDWR, 0666)
+		if err != nil {
+			fmt.Println("Error to read file...")
+			return nil
+		}
+		defer file.Close()
+		readAll, err := io.ReadAll(file)
+		if err != nil {
+			fmt.Println("Read date forom file have problem....")
+			return nil
+		}
+		var users []user
+		err = json.Unmarshal(readAll, &users)
+		if err != nil {
+			fmt.Println("Convert to jason file have problem ...")
+			return nil
+		}
+		return users
+	}
+	file, _ := os.OpenFile(fileName, os.O_CREATE, 0666)
+	file.Close()
+	return nil
+}
+
+func saveFile(fileName string, users []user) {
+	file, err := os.OpenFile(fileName, os.O_WRONLY, 0666)
+	if err != nil {
+		fmt.Println("Save file have problem....")
+		return
+	}
+	defer file.Close()
+	file.Truncate(0)
+	file.Seek(0, 0)
+	encode := json.NewEncoder(file)
+	err = encode.Encode(users)
+	if err != nil {
+		fmt.Println("Encode to json file have problem...")
+		return
+	}
+
+}
 
 func main() {
 	var users []user
 
 	r := gin.Default()
-
+	users = loadFile(fileName)
+	if users == nil {
+		users = []user{}
+	}
 	r.POST("/register", func(c *gin.Context) {
 		var newUser user
 		if err := c.ShouldBindJSON(&newUser); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"message": "Error to input data...."})
 			return
 		}
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newUser.Pass), bcrypt.DefaultCost)
+		if err != nil {
+			fmt.Println("Hash password have problem ....")
+
+		} else {
+			newUser.Pass = string(hashedPassword)
+		}
+
 		users = append(users, newUser)
+		saveFile(fileName, users)
 		c.JSON(http.StatusOK, gin.H{"message": "Register ok...",
-			"messsage": newUser.Name + newUser.Pass})
+			"details": newUser.Name + newUser.Pass}) // اصلاح نام فیلد
+
 	})
 
 	r.POST("/login", func(c *gin.Context) {
@@ -70,16 +132,20 @@ func main() {
 			return
 		}
 		for _, user := range users {
-			if user.Name == LoginUser.Name && user.Pass == LoginUser.Pass {
-				if token, err := makeToken(user); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Canat make the token..."})
-					return
-				} else {
-					c.JSON(http.StatusOK, gin.H{
-						"message": "Wellcom to system .... this is your token",
-						"token":   token})
+			if user.Name == LoginUser.Name {
+				err := bcrypt.CompareHashAndPassword([]byte(user.Pass), []byte(LoginUser.Pass))
+				if err == nil {
 
-					return
+					if token, err := makeToken(user); err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Canat make the token..."})
+						return
+					} else {
+						c.JSON(http.StatusOK, gin.H{
+							"message": "Wellcom to system .... this is your token",
+							"token":   token})
+
+						return
+					}
 				}
 
 			}
@@ -101,29 +167,29 @@ func main() {
 			return
 		}
 		token, err := validationToken(tokenString)
-		if err != nil {
+		if err != nil || !token.Valid {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "token not valid or convert problem...."})
 
 			return
 		}
-		if token.Valid {
-			c.JSON(http.StatusOK, gin.H{"Message": "This is a valid token......",
-				"token":   tokenString,
-				"message": "Wellcom to system ...."})
 
-			clime, ok := token.Claims.(jwt.MapClaims)
-			if !ok {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "claim map have problem..."})
-				return
-			}
-			expTime := time.Unix(int64(clime["exp"].(float64)), 0)
-			clime["exp_readable"] = expTime.Format("2006-01-02 15:04:05")
+		c.JSON(http.StatusOK, gin.H{"Message": "This is a valid token......",
+			"token":   tokenString,
+			"message": "Wellcom to system ...."})
 
-			c.JSON(http.StatusOK, gin.H{"username": clime["username"].(string),
-				"exp_readebel": clime["exp_readable"].(string),
-				"exp":          clime["exp"].(float64),
-			})
+		clime, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "claim map have problem..."})
+			return
 		}
+		expTime := time.Unix(int64(clime["exp"].(float64)), 0)
+		clime["exp_readable"] = expTime.Format("2006-01-02 15:04:05")
+
+		c.JSON(http.StatusOK, gin.H{"username": clime["username"].(string),
+			"exp_readable": clime["exp_readable"].(string),
+			"exp":          clime["exp"].(float64),
+		})
+
 	})
 
 	r.Run(":8080")
